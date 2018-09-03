@@ -10,17 +10,6 @@
 #include <unsupported/Eigen/MatrixFunctions>
 #include "krylov.hpp"
 
-/*
-static const int L = 10;
-static const int k = 5;
-
-static const complex J = 0.5;
-static const complex F = 0;
-static const complex U = 1;
-static const double W = 0;
-const int seed = 0;
-*/
-
 int main(int argc, char **argv) {
   /*
     Parse the arguments
