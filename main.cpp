@@ -16,12 +16,12 @@ int main(int argc, char **argv) {
     Parse the arguments
   */
   const int L = std::stoi(argv[1]);
-  const int k = std::stoi(argv[2]);
-  const complex J = complex(std::stof(argv[3]), 0);
-  const complex F = complex(std::stof(argv[4]), 0);
-  const complex U = complex(std::stof(argv[5]), 0);
-  const complex W = complex(std::stof(argv[6]), 0);
-  const int seed = std::stoi(argv[7]);
+  const int k = (int)(L / 2);  // std::stoi(argv[2]);
+  const complex J = complex(std::stof(argv[2]), 0);
+  const complex F = complex(std::stof(argv[3]), 0);
+  const complex U = complex(std::stof(argv[4]), 0);
+  const complex W = complex(std::stof(argv[5]), 0);
+  const int seed = std::stoi(argv[6]);
 
   std::cout << "Starting Krylov time-evolution for " << std::to_string(L)
             << " sites and " << std::to_string(k) << " particles" << std::endl;
