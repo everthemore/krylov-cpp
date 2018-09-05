@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
             << es.eigenvalues() << std::endl;
   */
 
-  double dt = 0.005;
+  double dt = 0.025;
 
   std::ofstream outputfile;
   char filename[128];
@@ -84,18 +84,20 @@ int main(int argc, char **argv) {
   state Psit = Psi;
   std::cout << "[*] Running Krylov propagation..." << std::endl;
   for (int i = 0; i < 10000; ++i) {
-    double density_even = 0;
-    for (int site = 0; site < L; site += 2)
-      density_even += Psit.dot(N[site] * Psit).real();
+    if (i % 100 == 0) {
+      double density_even = 0;
+      for (int site = 0; site < L; site += 2)
+        density_even += Psit.dot(N[site] * Psit).real();
 
-    double density_odd = 0;
-    for (int site = 1; site < L; site += 2)
-      density_odd += Psit.dot(N[site] * Psit).real();
+      double density_odd = 0;
+      for (int site = 1; site < L; site += 2)
+        density_odd += Psit.dot(N[site] * Psit).real();
 
-    double imbalance =
-        (density_odd - density_even) / (density_odd + density_even);
+      double imbalance =
+          (density_odd - density_even) / (density_odd + density_even);
 
-    if (i % 100 == 0) outputfile << i * dt << "\t" << imbalance << std::endl;
+      outputfile << i * dt << "\t" << imbalance << std::endl;
+    }
     Psit = krylov_propagate(H, Psit, dt, 3);
   }
   std::cout << "[*] Done" << std::endl;
