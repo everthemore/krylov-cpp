@@ -1,6 +1,5 @@
 #ifndef __KRYLOV_HPP__
-#define __KRYLOV_HPP__
-
+#define __KRYLOV_HPP__ 
 #include <omp.h>
 
 using basis = std::unordered_map<std::string, int>;
@@ -56,6 +55,9 @@ observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
                              complex F, complex U, complex W, int seed) {
   int num_basis = (int)basis.size();
   observable H(num_basis, num_basis);
+ 
+  // Initialize the random number generator     
+  std::default_random_engine generator(seed);
 
   std::vector<T> total;
 
@@ -82,62 +84,33 @@ observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
           basis::const_iterator got = basis.find(newstate);
           int that_index = (int)got->second;
 
+          // Add forward and backward hopping entries
           tripletList.push_back(T(this_index, that_index, J));
           tripletList.push_back(T(that_index, this_index, J));
-
-          // Add forward and backward hopping entries
-          /*
-        private_H.coeffRef(this_index, that_index) += J;
-        private_H.coeffRef(that_index, this_index) += J;
-        */
-          /*
-            pragma omp critical {
-              H.coeffRef(this_index, that_index) += J;
-              H.coeffRef(that_index, this_index) += J;
-            }
-            */
         }
       }
 
       // .. then the local field and disorder
-      std::default_random_engine generator(seed);
       std::uniform_real_distribution<double> distribution(0.0, 1.0);
 
       for (int site = 0; site < this_state.length(); ++site) {
-        // complex localspin = 2 * ((int)(this_state[site] - '0') - 0.5);
         complex localspin = (int)(this_state[site] - '0');
 
-        // tripletList.push_back(T(this_index, this_index,
-        // distribution(generator)*localspin*W));
-        // tripletList.push_back(T(this_index, this_index, localspin * F))
         tripletList.push_back(
             T(this_index, this_index,
               distribution(generator) * localspin * W + localspin * F));
-
-        /*
-        // Add on-site disorder
-        H.coeffRef(this_index, this_index) +=
-            distribution(generator) * localspin * W;
-
-        // Add local field
-        private_H.coeffRef(this_index, this_index) += localspin * F;
-        */
       }  // Local field and disorder
 
       // .. and then the interactions
       for (int site = 0; site < this_state.length() - 1; ++site) {
-        // complex localspin = 2 * ((int)(this_state[site] - '0') - 0.5);
         complex localspin = (int)(this_state[site] - '0');
-        // complex nextspin = 2 * ((int)(this_state[site + 1] - '0') - 0.5);
         complex nextspin = (int)(this_state[site + 1] - '0');
         tripletList.push_back(
             T(this_index, this_index, localspin * nextspin * U));
-        // private_H.coeffRef(this_index, this_index) += localspin * nextspin *
-        // U;
       }  // interactions
 
     }  // basis
-#pragma critical
+#pragma omp critical
     total.insert(total.end(), tripletList.begin(), tripletList.end());
 
     // H += private_H;
