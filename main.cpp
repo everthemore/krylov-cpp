@@ -1,14 +1,3 @@
-#include <math.h>
-#include <Eigen/Core>
-#include <Eigen/Dense>
-#include <Eigen/Eigenvalues>
-#include <Eigen/Sparse>
-#include <bitset>
-#include <fstream>
-#include <iostream>
-#include <random>
-#include <unordered_map>
-#include <unsupported/Eigen/MatrixFunctions>
 #include "krylov.hpp"
 
 int main(int argc, char **argv) {

@@ -1,6 +1,16 @@
 #ifndef __KRYLOV_HPP__
 #define __KRYLOV_HPP__
+
 #include <omp.h>
+#include <Eigen/Core>
+#include <Eigen/Dense>
+#include <Eigen/Eigenvalues>
+#include <Eigen/Sparse>
+#include <fstream>
+#include <iostream>
+#include <random>
+#include <unordered_map>
+#include <unsupported/Eigen/MatrixFunctions>
 
 /**
   For convenience, we introduce some new types
