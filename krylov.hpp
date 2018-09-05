@@ -57,11 +57,13 @@ observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
   int num_basis = (int)basis.size();
   observable H(num_basis, num_basis);
 
+  std::vector<T> total;
+
 // For each basis state..
-#pragma omp parallel
+#pragma omp parallel shared(H)
   {
-    // std::vector<T> tripletList;
-    observable private_H(num_basis, num_basis);
+    std::vector<T> tripletList;
+    // observable private_H(num_basis, num_basis);
 #pragma omp for nowait
     for (int e = 0; e < num_basis; ++e) {
       //  for (std::pair<std::string, int> element : basis) {
@@ -80,11 +82,20 @@ observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
           basis::const_iterator got = basis.find(newstate);
           int that_index = (int)got->second;
 
-          // tripletList.push_back(T(this_index, that_index, J));
+          tripletList.push_back(T(this_index, that_index, J));
+          tripletList.push_back(T(that_index, this_index, J));
 
           // Add forward and backward hopping entries
-          private_H.coeffRef(this_index, that_index) += J;
-          private_H.coeffRef(that_index, this_index) += J;
+          /*
+        private_H.coeffRef(this_index, that_index) += J;
+        private_H.coeffRef(that_index, this_index) += J;
+        */
+          /*
+            pragma omp critical {
+              H.coeffRef(this_index, that_index) += J;
+              H.coeffRef(that_index, this_index) += J;
+            }
+            */
         }
       }
 
@@ -96,12 +107,21 @@ observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
         // complex localspin = 2 * ((int)(this_state[site] - '0') - 0.5);
         complex localspin = (int)(this_state[site] - '0');
 
+        // tripletList.push_back(T(this_index, this_index,
+        // distribution(generator)*localspin*W));
+        // tripletList.push_back(T(this_index, this_index, localspin * F))
+        tripletList.push_back(
+            T(this_index, this_index,
+              distribution(generator) * localspin * W + localspin * F));
+
+        /*
         // Add on-site disorder
         H.coeffRef(this_index, this_index) +=
             distribution(generator) * localspin * W;
 
         // Add local field
         private_H.coeffRef(this_index, this_index) += localspin * F;
+        */
       }  // Local field and disorder
 
       // .. and then the interactions
@@ -110,14 +130,19 @@ observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
         complex localspin = (int)(this_state[site] - '0');
         // complex nextspin = 2 * ((int)(this_state[site + 1] - '0') - 0.5);
         complex nextspin = (int)(this_state[site + 1] - '0');
-        private_H.coeffRef(this_index, this_index) += localspin * nextspin * U;
+        tripletList.push_back(
+            T(this_index, this_index, localspin * nextspin * U));
+        // private_H.coeffRef(this_index, this_index) += localspin * nextspin *
+        // U;
       }  // interactions
 
     }  // basis
 #pragma critical
-    H += private_H;
-  }
+    total.insert(total.end(), tripletList.begin(), tripletList.end());
 
+    // H += private_H;
+  }
+  H.setFromTriplets(total.begin(), total.end());
   return H;
 }
 

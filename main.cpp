@@ -37,6 +37,8 @@ int main(int argc, char **argv) {
   observable H = build_hamiltonian(basis, inversebasis, J, F, U, W, seed);
   std::cout << "[*] Done" << std::endl;
 
+  // std::cout << H << std::endl;
+
   bool verbose = false;
   if (verbose) {
     int countit = 0;
