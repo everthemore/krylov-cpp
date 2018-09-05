@@ -1,4 +1,5 @@
 #include <math.h>
+#include <Eigen/Core>
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 #include <Eigen/Sparse>
