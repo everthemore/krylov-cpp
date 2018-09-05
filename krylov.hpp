@@ -1,14 +1,23 @@
 #ifndef __KRYLOV_HPP__
-#define __KRYLOV_HPP__ 
+#define __KRYLOV_HPP__
 #include <omp.h>
 
+/**
+  For convenience, we introduce some new types
+*/
 using basis = std::unordered_map<std::string, int>;
 using inversebasis = std::unordered_map<int, std::string>;
-using observable = Eigen::SparseMatrix<std::complex<double>>;
+using observable = Eigen::SparseMatrix<std::complex<double>, Eigen::RowMajor>;
 using state = Eigen::VectorXcd;
 using complex = std::complex<double>;
 typedef Eigen::Triplet<complex> T;
 
+/**
+  Converts an integer to a binary string representation, and
+  pads it until it has length L. This was done initially with
+  bitsets, but they can't be initialized with dynamically known
+  lengths.
+*/
 std::string int_to_bin(int i, int L) {
   std::string binary_representation = "";
 
@@ -23,10 +32,13 @@ std::string int_to_bin(int i, int L) {
   return binary_representation;
 }
 
-int count_ones(std::string s) {
+/**
+  Count the number of non-zero entries in the bitstring s
+*/
+int count_ones(std::string bitstring) {
   int count = 0;
-  for (int i = 0; i < s.length(); ++i)
-    if (s[i] == '1') count++;
+  for (int i = 0; i < bitstring.length(); ++i)
+    if (bitstring[i] == '1') count++;
   return count;
 }
 
@@ -54,25 +66,30 @@ basis build_basis(const int L, int k, inversebasis &inversebasis) {
 observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
                              complex F, complex U, complex W, int seed) {
   int num_basis = (int)basis.size();
-  observable H(num_basis, num_basis);
- 
-  // Initialize the random number generator     
-  std::default_random_engine generator(seed);
 
+  // Initialize the random number generator
+  std::default_random_engine generator(seed);
+  // And create a uniform distribution we can sample from
+  std::uniform_real_distribution<double> distribution(0.0, 1.0);
+
+  // Vector storing all the triplet pairs for setting the Sparse
+  // Hamiltonian later on.
   std::vector<T> total;
 
 // For each basis state..
-#pragma omp parallel shared(H)
+#pragma omp parallel
   {
+    // Each thread has its own local triplet list
     std::vector<T> tripletList;
-    // observable private_H(num_basis, num_basis);
-#pragma omp for nowait
-    for (int e = 0; e < num_basis; ++e) {
-      //  for (std::pair<std::string, int> element : basis) {
-      std::string this_state = inversebasis[e];
-      int this_index = e;  // element.second;
 
+#pragma omp for nowait
+    for (int i = 0; i < num_basis; ++i) {
+      // Extract the string describing this state
+      std::string this_state = inversebasis[i];
+
+      //
       // .. check for hopping
+      //
       for (int site = 0; site < this_state.length() - 1; ++site) {
         // Make a copy of the state
         std::string newstate(this_state);
@@ -82,43 +99,79 @@ observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
           newstate[site + 1] = '0';
 
           basis::const_iterator got = basis.find(newstate);
-          int that_index = (int)got->second;
+          int j = (int)got->second;
 
           // Add forward and backward hopping entries
-          tripletList.push_back(T(this_index, that_index, J));
-          tripletList.push_back(T(that_index, this_index, J));
+          tripletList.push_back(T(i, j, J));
+          tripletList.push_back(T(j, i, std::conj(J)));
         }
       }
 
+      //
       // .. then the local field and disorder
-      std::uniform_real_distribution<double> distribution(0.0, 1.0);
-
+      //
       for (int site = 0; site < this_state.length(); ++site) {
         complex localspin = (int)(this_state[site] - '0');
 
         tripletList.push_back(
-            T(this_index, this_index,
-              distribution(generator) * localspin * W + localspin * F));
+            T(i, i, distribution(generator) * localspin * W + localspin * F));
       }  // Local field and disorder
 
+      //
       // .. and then the interactions
+      //
       for (int site = 0; site < this_state.length() - 1; ++site) {
         complex localspin = (int)(this_state[site] - '0');
         complex nextspin = (int)(this_state[site + 1] - '0');
-        tripletList.push_back(
-            T(this_index, this_index, localspin * nextspin * U));
+        tripletList.push_back(T(i, i, localspin * nextspin * U));
       }  // interactions
 
     }  // basis
 #pragma omp critical
     total.insert(total.end(), tripletList.begin(), tripletList.end());
-
-    // H += private_H;
   }
+
+  // Create the sparse Hamiltonian matrix and populate it with the triplets
+  observable H(num_basis, num_basis);
   H.setFromTriplets(total.begin(), total.end());
   return H;
 }
 
+/**
+  Constructs the density operator on a given site
+*/
+observable build_density_operator(basis basis, inversebasis inversebasis,
+                                  int site) {
+  int num_basis = (int)basis.size();
+  std::vector<T> total;
+
+// For each basis state..
+#pragma omp parallel
+  {
+    std::vector<T> tripletList;
+#pragma omp for nowait
+    for (int i = 0; i < num_basis; ++i) {
+      //  for (std::pair<std::string, int> element : basis) {
+      std::string this_state = inversebasis[i];
+      complex localspin = (int)(this_state[site] - '0');
+
+      tripletList.push_back(T(i, i, localspin));
+    }
+#pragma omp critical
+    total.insert(total.end(), tripletList.begin(), tripletList.end());
+  }
+
+  // Create a new sparse matrix and populate it with the triplets
+  observable N(num_basis, num_basis);
+  N.setFromTriplets(total.begin(), total.end());
+  return N;
+}
+
+/**
+  Constructs the initial wavefunction. It is set to the
+  statestring specified. If that statestring does not exist,
+  the program will crash.
+*/
 state build_initial_state(basis basis, std::string statestring) {
   int num_basis = (int)basis.size();
   state Psi(num_basis);
@@ -131,27 +184,6 @@ state build_initial_state(basis basis, std::string statestring) {
 
   Psi.coeffRef(that_index) += complex(1, 0);
   return Psi;
-}
-
-/**
-  Constructs the density operator on a given site
-*/
-observable build_density_operator(basis basis, inversebasis inversebasis,
-                                  int site) {
-  int num_basis = (int)basis.size();
-  observable N(num_basis, num_basis);
-
-  // For each basis state..
-  // for (std::pair<std::string, int> element : basis) {
-  //#pragma omp parallel for
-  for (int e = 0; e < num_basis; ++e) {
-    //  for (std::pair<std::string, int> element : basis) {
-    std::string this_state = inversebasis[e];
-    int this_index = e;  // element.second;
-    complex localspin = (int)(this_state[site] - '0');
-    N.coeffRef(this_index, this_index) += localspin;
-  }
-  return N;
 }
 
 /**
