@@ -73,7 +73,6 @@ int main(int argc, char **argv) {
             << es.eigenvalues() << std::endl;
   */
 
-  /*
   double dt = 0.005;
 
   std::ofstream outputfile;
@@ -101,7 +100,6 @@ int main(int argc, char **argv) {
   }
   std::cout << "[*] Done" << std::endl;
   outputfile.close();
-  */
 
   return 0;
 }
