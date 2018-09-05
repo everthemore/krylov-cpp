@@ -1,10 +1,14 @@
 #ifndef __KRYLOV_HPP__
 #define __KRYLOV_HPP__
 
+#include <omp.h>
+
 using basis = std::unordered_map<std::string, int>;
+using inversebasis = std::unordered_map<int, std::string>;
 using observable = Eigen::SparseMatrix<std::complex<double>>;
 using state = Eigen::VectorXcd;
 using complex = std::complex<double>;
+typedef Eigen::Triplet<complex> T;
 
 std::string int_to_bin(int i, int L) {
   std::string binary_representation = "";
@@ -30,13 +34,16 @@ int count_ones(std::string s) {
 /**
   Builds the allowed basis states for L sites and k particles
 */
-basis build_basis(const int L, int k) {
+basis build_basis(const int L, int k, inversebasis &inversebasis) {
   int counter = 0;
   basis basis;
 
   for (int i = 0; i < pow(2, L); ++i) {
     std::string binrep = int_to_bin(i, L);
-    if (count_ones(binrep) == k) basis.insert({binrep, counter++});
+    if (count_ones(binrep) == k) {
+      inversebasis.insert({counter, binrep});
+      basis.insert({binrep, counter++});
+    }
   }
 
   return basis;
@@ -45,60 +52,97 @@ basis build_basis(const int L, int k) {
 /**
   Constructs the Hamiltonian matrix in sparse format
 */
-observable build_hamiltonian(basis basis, complex J, complex F, complex U,
-                             complex W, int seed) {
+observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
+                             complex F, complex U, complex W, int seed) {
   int num_basis = (int)basis.size();
   observable H(num_basis, num_basis);
 
-  // For each basis state..
-  for (std::pair<std::string, int> element : basis) {
-    int this_index = element.second;
+  std::vector<T> total;
 
-    // .. check for hopping
-    for (int site = 0; site < element.first.length() - 1; ++site) {
-      // Make a copy of the state
-      std::string newstate(element.first);
+// For each basis state..
+#pragma omp parallel shared(H)
+  {
+    std::vector<T> tripletList;
+    // observable private_H(num_basis, num_basis);
+#pragma omp for nowait
+    for (int e = 0; e < num_basis; ++e) {
+      //  for (std::pair<std::string, int> element : basis) {
+      std::string this_state = inversebasis[e];
+      int this_index = e;  // element.second;
 
-      if (element.first[site] == '0' && element.first[site + 1] == '1') {
-        newstate[site] = '1';
-        newstate[site + 1] = '0';
+      // .. check for hopping
+      for (int site = 0; site < this_state.length() - 1; ++site) {
+        // Make a copy of the state
+        std::string newstate(this_state);
 
-        basis::const_iterator got = basis.find(newstate);
-        int that_index = (int)got->second;
+        if (this_state[site] == '0' && this_state[site + 1] == '1') {
+          newstate[site] = '1';
+          newstate[site + 1] = '0';
 
-        // Add forward and backward hopping entries
-        H.coeffRef(this_index, that_index) += J * std::complex<double>(1, 0);
-        H.coeffRef(that_index, this_index) += J * std::complex<double>(1, 0);
+          basis::const_iterator got = basis.find(newstate);
+          int that_index = (int)got->second;
+
+          tripletList.push_back(T(this_index, that_index, J));
+          tripletList.push_back(T(that_index, this_index, J));
+
+          // Add forward and backward hopping entries
+          /*
+        private_H.coeffRef(this_index, that_index) += J;
+        private_H.coeffRef(that_index, this_index) += J;
+        */
+          /*
+            pragma omp critical {
+              H.coeffRef(this_index, that_index) += J;
+              H.coeffRef(that_index, this_index) += J;
+            }
+            */
+        }
       }
-    }
 
-    // .. then the local field and disorder
-    std::default_random_engine generator(seed);
-    std::uniform_real_distribution<double> distribution(0.0, 1.0);
+      // .. then the local field and disorder
+      std::default_random_engine generator(seed);
+      std::uniform_real_distribution<double> distribution(0.0, 1.0);
 
-    for (int site = 0; site < element.first.length(); ++site) {
-      // complex localspin = 2 * ((int)(element.first[site] - '0') - 0.5);
-      complex localspin = (int)(element.first[site] - '0');
+      for (int site = 0; site < this_state.length(); ++site) {
+        // complex localspin = 2 * ((int)(this_state[site] - '0') - 0.5);
+        complex localspin = (int)(this_state[site] - '0');
 
-      // Add on-site disorder
-      H.coeffRef(this_index, this_index) +=
-          distribution(generator) * localspin * W;
+        // tripletList.push_back(T(this_index, this_index,
+        // distribution(generator)*localspin*W));
+        // tripletList.push_back(T(this_index, this_index, localspin * F))
+        tripletList.push_back(
+            T(this_index, this_index,
+              distribution(generator) * localspin * W + localspin * F));
 
-      // Add local field
-      H.coeffRef(this_index, this_index) += localspin * complex(site, 0) * F;
-    }  // Local field and disorder
+        /*
+        // Add on-site disorder
+        H.coeffRef(this_index, this_index) +=
+            distribution(generator) * localspin * W;
 
-    // .. and then the interactions
-    for (int site = 0; site < element.first.length() - 1; ++site) {
-      // complex localspin = 2 * ((int)(element.first[site] - '0') - 0.5);
-      complex localspin = (int)(element.first[site] - '0');
-      // complex nextspin = 2 * ((int)(element.first[site + 1] - '0') - 0.5);
-      complex nextspin = (int)(element.first[site + 1] - '0');
-      H.coeffRef(this_index, this_index) += localspin * nextspin * U;
-    }  // interactions
+        // Add local field
+        private_H.coeffRef(this_index, this_index) += localspin * F;
+        */
+      }  // Local field and disorder
 
-  }  // basis
+      // .. and then the interactions
+      for (int site = 0; site < this_state.length() - 1; ++site) {
+        // complex localspin = 2 * ((int)(this_state[site] - '0') - 0.5);
+        complex localspin = (int)(this_state[site] - '0');
+        // complex nextspin = 2 * ((int)(this_state[site + 1] - '0') - 0.5);
+        complex nextspin = (int)(this_state[site + 1] - '0');
+        tripletList.push_back(
+            T(this_index, this_index, localspin * nextspin * U));
+        // private_H.coeffRef(this_index, this_index) += localspin * nextspin *
+        // U;
+      }  // interactions
 
+    }  // basis
+#pragma critical
+    total.insert(total.end(), tripletList.begin(), tripletList.end());
+
+    // H += private_H;
+  }
+  H.setFromTriplets(total.begin(), total.end());
   return H;
 }
 
@@ -119,14 +163,19 @@ state build_initial_state(basis basis, std::string statestring) {
 /**
   Constructs the density operator on a given site
 */
-observable build_density_operator(basis basis, int site) {
+observable build_density_operator(basis basis, inversebasis inversebasis,
+                                  int site) {
   int num_basis = (int)basis.size();
   observable N(num_basis, num_basis);
 
   // For each basis state..
-  for (std::pair<std::string, int> element : basis) {
-    int this_index = element.second;
-    complex localspin = (int)(element.first[site] - '0');
+  // for (std::pair<std::string, int> element : basis) {
+  //#pragma omp parallel for
+  for (int e = 0; e < num_basis; ++e) {
+    //  for (std::pair<std::string, int> element : basis) {
+    std::string this_state = inversebasis[e];
+    int this_index = e;  // element.second;
+    complex localspin = (int)(this_state[site] - '0');
     N.coeffRef(this_index, this_index) += localspin;
   }
   return N;
