@@ -27,25 +27,29 @@ int main(int argc, char **argv) {
 
   std::cout << "[*] Creating basis states" << std::endl;
   // Create basis map
-  basis basis = build_basis(L, k);
+  inversebasis inversebasis;
+  basis basis = build_basis(L, k, inversebasis);
   std::cout << "[*] Done" << std::endl;
 
   std::cout << "[*] Building Hamiltonian with field " << F
             << " and interactions " << U << std::endl;
-  observable H = build_hamiltonian(basis, J, F, U, W, seed);
+  observable H = build_hamiltonian(basis, inversebasis, J, F, U, W, seed);
   std::cout << "[*] Done" << std::endl;
 
-  int countit = 0;
-  for (int k = 0; k < H.outerSize(); ++k)
-    for (observable::InnerIterator it(H, k); it; ++it) {
-      it.value();
-      it.row();    // row index
-      it.col();    // col index (here it is equal to k)
-      it.index();  // inner index, here it is equal to it.row()
-      countit++;
-    }
+  bool verbose = false;
+  if (verbose) {
+    int countit = 0;
+    for (int k = 0; k < H.outerSize(); ++k)
+      for (observable::InnerIterator it(H, k); it; ++it) {
+        it.value();
+        it.row();    // row index
+        it.col();    // col index (here it is equal to k)
+        it.index();  // inner index, here it is equal to it.row()
+        countit++;
+      }
 
-  std::cout << "Non-zero entries: " << countit << std::endl;
+    std::cout << "Non-zero entries: " << countit << std::endl;
+  }
 
   std::string statestring = "";
   for (int i = 0; i < L; i += 2) statestring += "01";
@@ -56,7 +60,8 @@ int main(int argc, char **argv) {
 
   std::cout << "[*] Constructing the density operators" << std::endl;
   std::vector<observable> N;
-  for (int i = 0; i < L; ++i) N.push_back(build_density_operator(basis, i));
+  for (int i = 0; i < L; ++i)
+    N.push_back(build_density_operator(basis, inversebasis, i));
   std::cout << "[*] Done" << std::endl;
 
   /*
@@ -65,6 +70,7 @@ int main(int argc, char **argv) {
             << es.eigenvalues() << std::endl;
   */
 
+  /*
   double dt = 0.005;
 
   std::ofstream outputfile;
@@ -92,6 +98,7 @@ int main(int argc, char **argv) {
   }
   std::cout << "[*] Done" << std::endl;
   outputfile.close();
+  */
 
   return 0;
 }
