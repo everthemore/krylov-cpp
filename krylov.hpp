@@ -80,7 +80,7 @@ observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
   // Initialize the random number generator
   std::default_random_engine generator(seed);
   // And create a uniform distribution we can sample from
-  std::uniform_real_distribution<double> distribution(0.0, 1.0);
+  std::uniform_real_distribution<double> distribution(-1.0, 1.0);
 
   // Vector storing all the triplet pairs for setting the Sparse
   // Hamiltonian later on.
@@ -124,7 +124,7 @@ observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
         complex localspin = (int)(this_state[site] - '0');
 
         tripletList.push_back(
-            T(i, i, distribution(generator) * localspin * W + localspin * F));
+            T(i, i, distribution(generator) * localspin * W + localspin * F * complex(site,0)));
       }  // Local field and disorder
 
       //
