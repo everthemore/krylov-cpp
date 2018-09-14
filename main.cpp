@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
 
   state Psit = Psi;
   std::cout << "[*] Running Krylov propagation..." << std::endl;
-  for (int i = 0; i < 10000; ++i) {
+  for (int i = 0; i < 40000; ++i) {
     if (i % 100 == 0) {
       double density_even = 0;
       for (int site = 0; site < L; site += 2)
@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
 
       outputfile << i * dt << "\t" << imbalance << std::endl;
     }
-    Psit = krylov_propagate(H, Psit, dt, 3);
+    Psit = krylov_propagate(H, Psit, dt, 5);
   }
   std::cout << "[*] Done" << std::endl;
   outputfile.close();
