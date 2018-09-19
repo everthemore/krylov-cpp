@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
     Psit = krylov_propagate(H, Psit, dt, m);
 
     // Checkpoint the wavefunction
-    if (i % checkpoint_every) {
+    if (i % checkpoint_every == 0) {
       std::ofstream wfoutfile;
       wfoutfile.open(wf_filename);
       wfoutfile << Psit << std::endl;
