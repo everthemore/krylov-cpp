@@ -20,7 +20,7 @@ int main(int argc, char **argv) {
 
   // Wavefunction output filename
   char wf_filename[128];
-  std::sprintf(wffilename,
+  std::sprintf(wf_filename,
                "wavefunction-L-%d-F-%.2f-U-%.2f-W-%.2f-m-%d-seed-%d.txt", L,
                F.real(), U.real(), W.real(), m, seed);
 
