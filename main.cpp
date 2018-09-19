@@ -10,7 +10,25 @@ int main(int argc, char **argv) {
   const complex F = complex(std::stof(argv[3]), 0);
   const complex U = complex(std::stof(argv[4]), 0);
   const complex W = complex(std::stof(argv[5]), 0);
-  const int seed = std::stoi(argv[6]);
+  const int m = std::stoi(argv[6]);
+  const int seed = std::stoi(argv[7]);
+
+  double dt = 0.025;
+  int num_krylov_steps = 40000;
+  int compute_every = 100;
+  int checkpoint_every = 5000;
+
+  // Wavefunction output filename
+  char wf_filename[128];
+  std::sprintf(wffilename,
+               "wavefunction-L-%d-F-%.2f-U-%.2f-W-%.2f-m-%d-seed-%d.txt", L,
+               F.real(), U.real(), W.real(), m, seed);
+
+  // Imbalance output filename
+  char imbalance_filename[128];
+  std::sprintf(imbalance_filename,
+               "imbalance-L-%d-F-%.2f-U-%.2f-W-%.2f-m-%d-seed-%d.txt", L,
+               F.real(), U.real(), W.real(), m, seed);
 
   std::cout << "Starting Krylov time-evolution for " << std::to_string(L)
             << " sites and " << std::to_string(k) << " particles" << std::endl;
@@ -26,23 +44,6 @@ int main(int argc, char **argv) {
   observable H = build_hamiltonian(basis, inversebasis, J, F, U, W, seed);
   std::cout << "[*] Done" << std::endl;
 
-  // std::cout << H << std::endl;
-
-  bool verbose = false;
-  if (verbose) {
-    int countit = 0;
-    for (int k = 0; k < H.outerSize(); ++k)
-      for (observable::InnerIterator it(H, k); it; ++it) {
-        it.value();
-        it.row();    // row index
-        it.col();    // col index (here it is equal to k)
-        it.index();  // inner index, here it is equal to it.row()
-        countit++;
-      }
-
-    std::cout << "Non-zero entries: " << countit << std::endl;
-  }
-
   std::string statestring = "";
   for (int i = 0; i < L; i += 2) statestring += "01";
   std::cout << "[*] Setting up initial state " << std::endl;
@@ -51,44 +52,45 @@ int main(int argc, char **argv) {
   std::cout << "[*] Done" << std::endl;
 
   std::cout << "[*] Constructing the density operators" << std::endl;
-  std::vector<observable> N;
-  for (int i = 0; i < L; ++i)
-    N.push_back(build_density_operator(basis, inversebasis, i));
+  int num_basis = basis.size();
+  observable evenDensity(num_basis, num_basis);
+  observable oddDensity(num_basis, num_basis);
+  for (int i = 0; i < L; ++i) {
+    if (i % 2 == 0) {
+      evenDensity =
+          evenDensity + build_density_operator(basis, inversebasis, i);
+    } else {
+      oddDensity = oddDensity + build_density_operator(basis, inversebasis, i);
+    }
+  }
   std::cout << "[*] Done" << std::endl;
 
-  /*
-  Eigen::SelfAdjointEigenSolver<observable> es(H);
-  std::cout << "The eigenvalues of H are:" << std::endl
-            << es.eigenvalues() << std::endl;
-  */
-
-  double dt = 0.025;
-
   std::ofstream outputfile;
-  char filename[128];
-  std::sprintf(filename, "imbalance-L-%d-F-%.2f-U-%.2f-W-%.2f-seed-%d.txt", L,
-               F.real(), U.real(), W.real(), seed);
-  outputfile.open(filename);
+  outputfile.open(imbalance_filename);
 
-  state Psit = Psi;
   std::cout << "[*] Running Krylov propagation..." << std::endl;
-  for (int i = 0; i < 40000; ++i) {
-    if (i % 100 == 0) {
-      double density_even = 0;
-      for (int site = 0; site < L; site += 2)
-        density_even += Psit.dot(N[site] * Psit).real();
-
-      double density_odd = 0;
-      for (int site = 1; site < L; site += 2)
-        density_odd += Psit.dot(N[site] * Psit).real();
-
+  state Psit = Psi;
+  for (int i = 0; i < num_krylov_steps; ++i) {
+    if (i % compute_every == 0) {
+      double density_even = Psit.dot(evenDensity * Psit).real();
+      double density_odd = Psit.dot(oddDensity * Psit).real();
       double imbalance =
           (density_odd - density_even) / (density_odd + density_even);
 
       outputfile << i * dt << "\t" << imbalance << std::endl;
     }
-    Psit = krylov_propagate(H, Psit, dt, 5);
+
+    Psit = krylov_propagate(H, Psit, dt, m);
+
+    // Checkpoint the wavefunction
+    if (i % checkpoint_every) {
+      std::ofstream wfoutfile;
+      wfoutfile.open(wf_filename);
+      wfoutfile << Psit << std::endl;
+      wfoutfile.close();
+    }
   }
+
   std::cout << "[*] Done" << std::endl;
   outputfile.close();
 

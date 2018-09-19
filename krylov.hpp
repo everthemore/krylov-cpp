@@ -82,6 +82,11 @@ observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
   // And create a uniform distribution we can sample from
   std::uniform_real_distribution<double> distribution(-1.0, 1.0);
 
+  std::vector<double> onsitedisorder;
+  int systemsize = inversebasis[0].length();
+  for (int i = 0; i < systemsize; ++i)
+    onsitedisorder.push_back(distribution(generator));
+
   // Vector storing all the triplet pairs for setting the Sparse
   // Hamiltonian later on.
   std::vector<T> total;
@@ -100,7 +105,7 @@ observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
       //
       // .. check for hopping
       //
-      for (int site = 0; site < this_state.length() - 1; ++site) {
+      for (int site = 0; site < systemsize - 1; ++site) {
         // Make a copy of the state
         std::string newstate(this_state);
 
@@ -120,17 +125,18 @@ observable build_hamiltonian(basis basis, inversebasis inversebasis, complex J,
       //
       // .. then the local field and disorder
       //
-      for (int site = 0; site < this_state.length(); ++site) {
+      for (int site = 0; site < systemsize; ++site) {
         complex localspin = (int)(this_state[site] - '0');
 
-        tripletList.push_back(
-            T(i, i, distribution(generator) * localspin * W + localspin * F * complex(site,0)));
+        tripletList.push_back(T(i, i,
+                                onsitedisorder.at(site) * localspin * W +
+                                    localspin * F * complex(site, 0)));
       }  // Local field and disorder
 
       //
       // .. and then the interactions
       //
-      for (int site = 0; site < this_state.length() - 1; ++site) {
+      for (int site = 0; site < systemsize - 1; ++site) {
         complex localspin = (int)(this_state[site] - '0');
         complex nextspin = (int)(this_state[site + 1] - '0');
         tripletList.push_back(T(i, i, localspin * nextspin * U));
@@ -197,6 +203,91 @@ state build_initial_state(basis basis, std::string statestring) {
 }
 
 /**
+ * Creates an orthonormal subspace the size of Q's columns.
+ */
+void build_orthogonal_basis_Arnoldi(observable H, state Psi,
+                                    Eigen::MatrixXcd &Q, Eigen::MatrixXcd &h) {
+  Q.col(0) = Psi.normalized();
+  for (int i = 1; i < Q.cols(); ++i) {
+    // Obtain the next q vector
+    state q = H * Q.col(i - 1);
+
+    // Orthonormalize it w.r.t. all the others
+    for (int k = 0; k < i; ++k) {
+      h(k, i - 1) = Q.col(k).dot(q);
+      q = q - h(k, i - 1) * Q.col(k);
+    }
+
+    // Normalize it and store that in our upper Hessenberg matrix h
+    h(i, i - 1) = q.norm();
+
+    // Check if we found a subspace
+    if (h(i, i - 1).real() <= 1e-14) {
+      std::cerr << "Invariant subspace found before finishing Arnoldi"
+                << std::endl;
+    }
+
+    // And set it as the next column of Q
+    Q.col(i) = q / h(i, i - 1);
+  }
+
+  // Complete h by setting the last column manually
+  int i = Q.cols() - 1;
+  h(i, i) = Q.col(i).dot(H * Q.col(i));
+  h(i - 1, i) = h(i, i - 1);
+}
+
+/**
+ * Creates an orthonormal subspace the size of Q's columns.
+ */
+void build_orthogonal_basis_Lanczos(observable H, state Psi,
+                                    Eigen::MatrixXcd &Q, Eigen::MatrixXcd &h) {
+  Eigen::VectorXcd alpha(Q.cols());
+  Eigen::VectorXcd beta(Q.cols());
+
+  beta(0) = 0;
+
+  Q.col(0) = Psi.normalized();  // u1; U1 = [u1]
+  for (int j = 1; j < Q.cols(); ++j) {
+    // Obtain the next q vector
+    state q = H * Q.col(j - 1);
+
+    alpha(j - 1) = Q.col(j - 1).dot(q);
+
+    q = q - alpha(j - 1) * Q.col(j - 1);
+    if (j > 1) {
+      q = q - beta(j - 2) * Q.col(j - 2);
+    }
+
+    // Re-orthogonalize
+    auto delta = Q.col(j - 1).dot(q);
+    q = q - Q.col(j - 1) * delta;
+    alpha(j - 1) = alpha(j - 1) + delta;
+
+    // Compute the norm
+    beta(j - 1) = q.norm();
+
+    // Check if we found a subspace
+    if (beta(j - 1).real() <= 1e-14) {
+      std::cerr << "Invariant subspace found before finishing Arnoldi"
+                << std::endl;
+    }
+
+    // And set it as the next column of Q
+    Q.col(j) = q / beta(j - 1);
+  }
+
+  // Set the projected Hamiltonian
+  h.diagonal() = alpha.tail(Q.cols());
+  h.diagonal(-1) = beta.head(Q.cols() - 1);
+  h.diagonal(+1) = beta.head(Q.cols() - 1);
+
+  // The last diagonal has to be set separately still
+  int i = Q.cols() - 1;
+  h(i, i) = Q.col(i).dot(H * Q.col(i));
+}
+
+/**
   Propagates Psi for one dt under H using a Krylov subspace
   of dimension m.
 */
@@ -204,34 +295,47 @@ state krylov_propagate(observable H, state Psi, double dt, int m) {
   // Krylov subspace orthogonal basis
   Eigen::MatrixXcd Q(Psi.size(), m);
   Q = Eigen::MatrixXcd::Zero(Psi.size(), m);
-  // H projected into the Krylov subspace
+
+  // H projected into the Krylov subspace. It is an upper Hessenberg
+  // matrix if doing Arnoldi, but we never need the extra bottom row
+  // if we're not implementing an adaptive routine that automatically
+  // sets m.
   Eigen::MatrixXcd h(m, m);
   h = Eigen::MatrixXcd::Zero(m, m);
 
-  // Set the first column
-  Q.col(0) = Psi.normalized();
-  for (int i = 1; i < m; ++i) {
-    // Obtain the next q vector
-    state qi = H * Q.col(i - 1);
+  /**
+   * Orthogonalize using Gram-Schmidt (sometimes called Arnoldi, since the
+   *   to-be-orthogonalized vectors are computed on-the-fly instead of being
+   *   stored as a matrix).
+   * Includes a re-orthogonalization step
+   *   (https://link.springer.com/article/10.1007/s00211-005-0615-4)
+   *
+   * TODO: A better thing to do here might be to use householder to
+   *       compute a QR decomposition and use that! After this first
+   *       round of GramSchmidt-ing, the resulting vectors are not
+   *       very orthogonal for large m (about 10).
+   *
+   * TODO: We are building a Krylov subspace of the Hamiltonian, i.e.
+   *       of a Hermitian matrix. So we should be using Lanczos instead of
+   *       Arnoldi!
+   */
 
-    // Orthonormalize it w.r.t. all the others
-    for (int k = 0; k < i; ++k) {
-      qi = qi - Q.col(k).dot(qi) * Q.col(k);
-    }
+  /*
+  // Use Arnoldi to compute Q and h
+  build_orthogonal_basis_Arnoldi(H, Psi, Q, h);
+  std::cout << "Arnoldi: " << std::endl << h << std::endl;
+  std::cout << "QdagQ:" << std::endl << Q.adjoint() * Q << std::endl;
+  */
 
-    // And set the next column
-    Q.col(i) = qi.normalized();
-  }
+  // Use the Lanczos algorithm with re-orthogonalization to
+  // compute an orthonormal Krylov subspace basis, and use it
+  // to obtain the projection matrix Q and the projected Hamiltonian h.
+  build_orthogonal_basis_Lanczos(H, Psi, Q, h);
 
-  // Now we can project the Hamiltonian into the Krylov subspace
-  h = Q.adjoint() * H * Q;  // Is now an m-by-m matrix
   // Convert to represent -iHdt
   h *= complex(0, -dt);
-
-  // This is a basis-by-basis times basis multiplication; this should
-  // be sparse and hence not cost much memory; but it does..
-  // return (Q * h.exp() * Q.adjoint()) * Q.col(0);
+  // And return the first column of the back-transformed H
   return (Q * h.exp()).col(0);
 }
 
-#endif
+#endif  //__KRYLOV_HPP__
